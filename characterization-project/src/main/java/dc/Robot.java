@@ -9,6 +9,8 @@ package dc;
 
 import java.util.function.Supplier;
 
+import com.ctre.phoenix.motorcontrol.FeedbackDevice;
+
 // WPI_Talon* imports are needed in case a user has a Pigeon on a Talon
 
 import com.ctre.phoenix.motorcontrol.NeutralMode;
@@ -22,7 +24,7 @@ import edu.wpi.first.wpilibj.SPI;
 
 import edu.wpi.first.networktables.NetworkTableEntry;
 import edu.wpi.first.networktables.NetworkTableInstance;
-import edu.wpi.first.wpilibj.Encoder;
+
 import edu.wpi.first.wpilibj.Joystick;
 
 import edu.wpi.first.wpilibj.RobotController;
@@ -38,15 +40,20 @@ import java.util.ArrayList;
 
 public class Robot extends TimedRobot {
 
-  static private double ENCODER_EDGES_PER_REV = 16384 / 4.;
-  static private double GEARING = 4;
-  
-  private double encoderConstant = (1 / GEARING) * (1 / ENCODER_EDGES_PER_REV);
+  static private double TPR = 2048; // Ticks per revolution
+  static private double GEAR_RATIO = 4; 
+  static private double WHEEL_DIAMETER = 6; // Diameter (inches) based on your wheel 
+
+  private WPI_TalonFX m_leftMotor; 
+
+  private WPI_TalonFX m_rightMotor;
 
   Joystick stick;
   DifferentialDrive drive;
 
   public static final AHRS gyro = new AHRS(SPI.Port.kMXP);
+
+  //TODO figure out Supplier List
 
   Supplier<Double> leftEncoderPosition;
   Supplier<Double> leftEncoderRate;
@@ -85,48 +92,8 @@ public class Robot extends TimedRobot {
     motor.configFactoryDefault();
     motor.setNeutralMode(NeutralMode.Brake);
     motor.setInverted(inverted);
-    
-    // setup encoder if motor isn't a follower
-    if (side != Sides.FOLLOWER) {
-    
-      Encoder encoder;
-
-
-
-    switch (side) {
-      // setup encoder and data collecting methods
-
-      case RIGHT:
-        // set right side methods = encoder methods
-
-        encoder = new Encoder(20, 21);
-        encoder.setReverseDirection(false);
-
-        encoder.setDistancePerPulse(encoderConstant);
-        rightEncoderPosition = encoder::getDistance;
-        rightEncoderRate = encoder::getRate;
-
-        break;
-      case LEFT:
-        encoder = new Encoder(24, 23);
-        encoder.setReverseDirection(false);
-        encoder.setDistancePerPulse(encoderConstant);
-        leftEncoderPosition = encoder::getDistance;
-        leftEncoderRate = encoder::getRate;
-
-
-        break;
-      default:
-        // probably do nothing
-        break;
-
-      }
-    
-    }
-    
 
     return motor;
-
   }
 
   @Override
@@ -136,14 +103,19 @@ public class Robot extends TimedRobot {
     stick = new Joystick(0);
     
     // create left motor
-    WPI_TalonFX leftMotor = setupWPI_TalonFX(24, Sides.LEFT, false);
+    WPI_TalonFX leftMotor = setupWPI_TalonFX(23, Sides.LEFT, false);
 
-    WPI_TalonFX leftFollowerID8 = setupWPI_TalonFX(23, Sides.FOLLOWER, false);
+    WPI_TalonFX leftFollowerID8 = setupWPI_TalonFX(24, Sides.FOLLOWER, false);
     leftFollowerID8.follow(leftMotor);
 
-    WPI_TalonFX rightMotor = setupWPI_TalonFX(20, Sides.RIGHT, false);
-    WPI_TalonFX rightFollowerID15 = setupWPI_TalonFX(21, Sides.FOLLOWER, false);    
+    m_leftMotor = leftMotor;
+
+    WPI_TalonFX rightMotor = setupWPI_TalonFX(21, Sides.RIGHT, false);
+    WPI_TalonFX rightFollowerID15 = setupWPI_TalonFX(20, Sides.FOLLOWER, false);    
     rightFollowerID15.follow(rightMotor);
+
+    m_rightMotor = rightMotor;
+
     drive = new DifferentialDrive(leftMotor, rightMotor);
     drive.setDeadband(0);
 
@@ -183,10 +155,10 @@ public class Robot extends TimedRobot {
   @Override
   public void robotPeriodic() {
     // feedback for users, but not used by the control program
-    SmartDashboard.putNumber("l_encoder_pos", leftEncoderPosition.get());
+    /*SmartDashboard.putNumber("l_encoder_pos", leftEncoderPosition.get());
     SmartDashboard.putNumber("l_encoder_rate", leftEncoderRate.get());
     SmartDashboard.putNumber("r_encoder_pos", rightEncoderPosition.get());
-    SmartDashboard.putNumber("r_encoder_rate", rightEncoderRate.get());
+    SmartDashboard.putNumber("r_encoder_rate", rightEncoderRate.get());*/
   }
 
   @Override
@@ -194,6 +166,7 @@ public class Robot extends TimedRobot {
     System.out.println("Robot in operator control mode");
   }
 
+  
   @Override
   public void teleopPeriodic() {
     drive.arcadeDrive(-stick.getY(), stick.getX());
@@ -206,6 +179,16 @@ public class Robot extends TimedRobot {
     counter = 0;
   }
 
+  public static double ticksToDistance(double ticks){
+    double rotationCountMS = ticks / TPR; 
+    double rotationCountGS = rotationCountMS / GEAR_RATIO;
+    double wheelCircumference = WHEEL_DIAMETER * Math.PI;
+    double distance = rotationCountGS * wheelCircumference;
+
+    return distance /= 12; //converts distance to feet
+  }
+
+  
   /**
   * If you wish to just use your own robot program to use with the data logging
   * program, you only need to copy/paste the logic below into your code and
@@ -220,11 +203,11 @@ public class Robot extends TimedRobot {
     // Retrieve values to send back before telling the motors to do something
     double now = Timer.getFPGATimestamp();
 
-    double leftPosition = leftEncoderPosition.get();
-    double leftRate = leftEncoderRate.get();
+    double feetLeftPosition = ticksToDistance(m_leftMotor.getSelectedSensorPosition());
+    double leftRate = m_leftMotor.getSelectedSensorVelocity();
 
-    double rightPosition = rightEncoderPosition.get();
-    double rightRate = rightEncoderRate.get();
+    double feetRightPosition = -ticksToDistance(m_rightMotor.getSelectedSensorPosition());
+    double rightRate = m_rightMotor.getSelectedSensorVelocity();
 
     double battery = RobotController.getBatteryVoltage();
     double motorVolts = battery * Math.abs(priorAutospeed);
@@ -247,8 +230,8 @@ public class Robot extends TimedRobot {
     numberArray[2] = autospeed;
     numberArray[3] = leftMotorVolts;
     numberArray[4] = rightMotorVolts;
-    numberArray[5] = leftPosition;
-    numberArray[6] = rightPosition;
+    numberArray[5] = feetLeftPosition;
+    numberArray[6] = feetRightPosition;
     numberArray[7] = leftRate;
     numberArray[8] = rightRate;
     numberArray[9] = gyroAngleRadians.get();

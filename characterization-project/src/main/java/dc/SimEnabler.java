@@ -25,6 +25,22 @@ public class SimEnabler implements Sendable {
     }
   }
 
+  /*@Override
+  public String getName() {
+    return "SimEnabler";
+  }
+
+  @Override
+  public void setName(String name) {}
+
+  @Override
+  public String getSubsystem() {
+    return "";
+  }
+
+  @Override
+  public void setSubsystem(String subsystem) {}
+*/
   @Override
   public void initSendable(SendableBuilder builder) {
     builder.addBooleanProperty("Enabled", 
